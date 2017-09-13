@@ -4,6 +4,8 @@ contract Splitter {
     // Fields.
     address public bobAddress;
     address public carolAddress;
+
+    mapping (address => uint) balances;
     bool public isKilled;
     address public owner;
 
@@ -12,6 +14,9 @@ contract Splitter {
         address indexed sender,
         address indexed receiver1,
         address indexed receiver2,
+        uint ammount);
+    event WithdrawEvent(
+        address indexed addr,
         uint ammount);
 
     // Modifiers.
@@ -32,6 +37,14 @@ contract Splitter {
     }
 
     // Functions.
+    function getBalance(address addr) returns (uint balance) {
+        return balances[addr];
+    }
+
+    function getTotalBalance() returns (uint balance) {
+        return this.balance;
+    }
+
     function kill() restricted {
         isKilled = true;
     }
@@ -52,8 +65,20 @@ contract Splitter {
             msg.value);
 
         //split
-        receiver1.transfer(receiver1Value);
-        receiver2.transfer(receiver2Value);
+        balances[receiver1] += receiver1Value;
+        balances[receiver2] += receiver2Value;
+    }
+
+    function withdraw() {
+        //get
+        uint amount = balances[msg.sender];
+        balances[msg.sender] = 0;
+
+        //events
+        WithdrawEvent(msg.sender, amount);
+
+        //withdraw
+        msg.sender.transfer(amount);
     }
 
     //deafult

@@ -32,14 +32,6 @@ contract Splitter {
     }
 
     // Functions.
-    function getBobBalance() returns (uint balance) {
-        return bobAddress.balance;
-    }
-    
-    function getCarolBalance() returns (uint balance) {
-        return carolAddress.balance;
-    }
-
     function kill() restricted {
         isKilled = true;
     }

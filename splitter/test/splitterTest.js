@@ -63,6 +63,39 @@ contract('Splitter', accounts => {
     //             await expectThrow(instance.sendTransaction({ from: accounts[0], value: 1000 })))
     // );
 
+    it("Should withdraw owned balance", () =>
+    {
+        var accountBalanceStep0 = web3.eth.getBalance(accounts[1]);
+        var accountBalanceStep1;
+        var accountBalanceStep2;
+
+        var getGasCost = txInfo => txInfo.receipt.cumulativeGasUsed * web3.eth.gasPrice;
+
+        instance.split(accounts[1], accounts[2], { from: accounts[0], value: 1000 })
+            .then(txInfo => instance.withdraw({ from: accounts[1], gasPrice: web3.eth.gasPrice }))
+            .then(txInfo => {
+                accountBalanceStep1 = web3.eth.getBalance(accounts[1]);
+
+                assert.equal(accountBalanceStep1,
+                    accountBalanceStep0 - getGasCost(txInfo) + 500,
+                    "Balance is wrong after first withdraw");
+
+                return instance.withdraw({ from: accounts[1], gasPrice: web3.eth.gasPrice });
+            })
+            .then(txInfo => {
+                accountBalanceStep2 = web3.eth.getBalance(accounts[1]);
+
+                assert.equal(accountBalanceStep2,
+                    accountBalanceStep1 - getGasCost(txInfo),
+                    "Balance is wrong after second withdraw");
+                
+                // THIS SHOULD NOT PASS!
+                assert.equal(accountBalanceStep2,
+                    accountBalanceStep1 - getGasCost(txInfo) + 500,
+                    "THIS SHOULD NOT PASS");
+            })
+    });
+
     it("Should split with fallback", () =>
         instance.sendTransaction({ from: accounts[0], value: 1000 })
             .then(txInfo => instance.getBalance.call(bobAddress, { from: accounts[0] }))

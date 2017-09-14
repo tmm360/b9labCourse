@@ -10,6 +10,7 @@ contract Splitter {
     address public owner;
 
     // Events.
+    event KilledEvent();
     event SplitEvent(
         address indexed sender,
         address indexed receiver1,
@@ -37,15 +38,16 @@ contract Splitter {
     }
 
     // Functions.
-    function getBalance(address addr) returns (uint balance) {
+    function getBalance(address addr) constant returns (uint balance) {
         return balances[addr];
     }
 
-    function getTotalBalance() returns (uint balance) {
+    function getTotalBalance() constant returns (uint balance) {
         return this.balance;
     }
 
     function kill() restricted {
+        KilledEvent();
         isKilled = true;
     }
 

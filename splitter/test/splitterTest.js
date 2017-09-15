@@ -1,3 +1,4 @@
+const expectedExceptionPromise = require("./helpers/expected_exception_testRPC_and_geth.js");
 var Splitter = artifacts.require("./Splitter.sol");
 
 var bobAddress = "0xBeB2A06Eb48AcDd0e4C23B6740E04c495856fA08";
@@ -56,12 +57,11 @@ contract('Splitter', accounts => {
             .then(result => assert.equal(result, 500, "Address2 balance is wrong"))
     });
 
-    // //Using https://github.com/OpenZeppelin/zeppelin-solidity/blob/master/test/helpers/expectThrow.js
-    // it("Should not split if killed", () =>
-    //     instance.kill({ from: accounts[0] })
-    //         .then(async txInfo =>
-    //             await expectThrow(instance.sendTransaction({ from: accounts[0], value: 1000 })))
-    // );
+    it("Should not split if killed", () =>
+        instance.kill({ from: accounts[0] })
+            .then(txInfo => expectedExceptionPromise(() =>
+                instance.sendTransaction({ from: accounts[0], value: 1000, gas: 3000000 }), 3000000))
+    );
 
     it("Should withdraw owned balance", () =>
     {

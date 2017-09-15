@@ -69,15 +69,15 @@ contract('Splitter', accounts => {
         var accountBalanceStep1;
         var accountBalanceStep2;
 
-        var getGasCost = txInfo => txInfo.receipt.cumulativeGasUsed * web3.eth.gasPrice;
+        var getGasCost = txInfo => web3.eth.gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
 
         instance.split(accounts[1], accounts[2], { from: accounts[0], value: 1000 })
             .then(txInfo => instance.withdraw({ from: accounts[1], gasPrice: web3.eth.gasPrice }))
             .then(txInfo => {
                 accountBalanceStep1 = web3.eth.getBalance(accounts[1]);
 
-                assert.equal(accountBalanceStep1,
-                    accountBalanceStep0 - getGasCost(txInfo) + 500,
+                assert.equal(accountBalanceStep1.toString(10),
+                    accountBalanceStep0.sub(getGasCost(txInfo)).add(500).toString(10),
                     "Balance is wrong after first withdraw");
 
                 return instance.withdraw({ from: accounts[1], gasPrice: web3.eth.gasPrice });
@@ -85,14 +85,9 @@ contract('Splitter', accounts => {
             .then(txInfo => {
                 accountBalanceStep2 = web3.eth.getBalance(accounts[1]);
 
-                assert.equal(accountBalanceStep2,
-                    accountBalanceStep1 - getGasCost(txInfo),
+                assert.equal(accountBalanceStep2.toString(10),
+                    accountBalanceStep1.sub(getGasCost(txInfo)).toString(10),
                     "Balance is wrong after second withdraw");
-                
-                // THIS SHOULD NOT PASS!
-                assert.equal(accountBalanceStep2,
-                    accountBalanceStep1 - getGasCost(txInfo) + 500,
-                    "THIS SHOULD NOT PASS");
             })
     });
 

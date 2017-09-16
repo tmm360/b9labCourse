@@ -76,8 +76,8 @@ contract('Splitter', accounts => {
             .then(txInfo => {
                 accountBalanceStep1 = web3.eth.getBalance(accounts[1]);
 
-                assert.equal(accountBalanceStep1.toString(10),
-                    accountBalanceStep0.sub(getGasCost(txInfo)).add(500).toString(10),
+                assert.deepEqual(accountBalanceStep1,
+                    accountBalanceStep0.sub(getGasCost(txInfo)).add(500),
                     "Balance is wrong after first withdraw");
 
                 return instance.withdraw({ from: accounts[1], gasPrice: web3.eth.gasPrice });
@@ -85,8 +85,8 @@ contract('Splitter', accounts => {
             .then(txInfo => {
                 accountBalanceStep2 = web3.eth.getBalance(accounts[1]);
 
-                assert.equal(accountBalanceStep2.toString(10),
-                    accountBalanceStep1.sub(getGasCost(txInfo)).toString(10),
+                assert.deepEqual(accountBalanceStep2,
+                    accountBalanceStep1.sub(getGasCost(txInfo)),
                     "Balance is wrong after second withdraw");
             })
     });

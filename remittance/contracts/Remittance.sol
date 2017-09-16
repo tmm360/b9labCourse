@@ -14,7 +14,7 @@ contract Remittance {
     uint constant MAX_DURATION = 31 days;
 
     // Fields.
-    mapping (address => mapping (bytes32 => Deposit)) deposits; //author => psws hash => ammount
+    mapping (address => mapping (bytes32 => Deposit)) public deposits; //author => psws hash => ammount
     uint public earnedFees;
     bool public isKilled;
     address public owner;
@@ -45,7 +45,9 @@ contract Remittance {
         deposits[msg.sender][oldPswsHash] = Deposit(0, 0, 0);
     }
 
-    function deposit(bytes32 pswsHash, uint duration) payable {
+    function deposit(bytes32 pswsHash, uint hoursDuration) payable {
+        uint duration = hoursDuration * 1 hours;
+        
         require(!isKilled);
         require(duration <= MAX_DURATION);
         require(deposits[msg.sender][pswsHash].balance == 0);
@@ -56,14 +58,6 @@ contract Remittance {
 
         earnedFees += cost;
         deposits[msg.sender][pswsHash] = Deposit(msg.value - cost, now, now + duration);
-    }
-
-    function getDepositBalance(address addr, bytes32 pswsHash) constant returns (uint balance) {
-        return deposits[addr][pswsHash].balance;
-    }
-
-    function getEarnedFees() constant returns (uint fees) {
-        return earnedFees;
     }
 
     function getTotalBalance() constant returns (uint balance) {

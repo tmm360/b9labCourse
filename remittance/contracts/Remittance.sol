@@ -14,8 +14,8 @@ contract Remittance {
     uint constant MAX_DURATION = 31 days;
 
     // Fields.
+    uint public depositedFees;
     mapping (address => mapping (bytes32 => Deposit)) public deposits; //author => psws hash => ammount
-    uint public earnedFees;
     bool public isKilled;
     address public owner;
 
@@ -56,7 +56,7 @@ contract Remittance {
 
         uint cost = min(msg.value * MAX_THOUSANDTHS_COST / 1000, MAX_DEPOSIT_COST);
 
-        earnedFees += cost;
+        depositedFees += cost;
         deposits[msg.sender][pswsHash] = Deposit(msg.value - cost, now, now + duration);
     }
 
@@ -84,8 +84,8 @@ contract Remittance {
     }
 
     function withdrawFees() restricted {
-        uint amount = earnedFees;
-        earnedFees = 0;
+        uint amount = depositedFees;
+        depositedFees = 0;
 
         WithdrawFeesEvent(amount);
 

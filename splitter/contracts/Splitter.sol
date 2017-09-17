@@ -5,7 +5,7 @@ contract Splitter {
     address public bobAddress;
     address public carolAddress;
 
-    mapping (address => uint) balances;
+    mapping (address => uint) public balances;
     bool public isKilled;
     address public owner;
 
@@ -38,10 +38,6 @@ contract Splitter {
     }
 
     // Functions.
-    function getBalance(address addr) constant returns (uint balance) {
-        return balances[addr];
-    }
-
     function getTotalBalance() constant returns (uint balance) {
         return this.balance;
     }

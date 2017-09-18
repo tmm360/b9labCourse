@@ -1,9 +1,26 @@
 const expectedExceptionPromise = require("../../helpers/test/expected_exception_testRPC_and_geth.js");
-var Remittance = artifacts.require("./Remittance.sol");
-var keccak256 = obj => "0x" + require('js-sha3').keccak256(obj);
+const Remittance = artifacts.require("./Remittance.sol");
+
+function promisify(func) {
+    return function promiseFunc(options) {
+        return new Promise(function executor(resolve, reject) {
+            func(options, function cb(err, val) {
+                if (err) {
+                    return reject(err);
+                } else {
+                    return resolve(val);
+                }
+            });
+        });
+    }
+}
 
 contract('Remittance', accounts => {
-    const getGasCost = txInfo => web3.eth.gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
+    const getBalance = promisify(web3.eth.getBalance);
+    const getBlock = promisify(web3.eth.getBlock);
+    const getGasCost = (txInfo, gasPrice) => gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
+    const getGasPrice = promisify(web3.eth.getGasPrice);
+    const keccak256 = obj => "0x" + require('js-sha3').keccak256(obj);
 
     var remittance;
 
@@ -45,8 +62,8 @@ contract('Remittance', accounts => {
         var blockTimestamp;
 
         instance.deposit(hash1, 12, { from: accounts[0], value: 1000 })
-            .then(txInfo => {
-                var block = web3.eth.getBlock(txInfo.receipt.blockNumber);
+            .then(txInfo => getBlock(txInfo.receipt.blockNumber))
+            .then(block => {
                 blockTimestamp = block.timestamp;
 
                 return instance.deposits.call(accounts[0], hash1, { from: accounts[0] });
@@ -95,6 +112,7 @@ contract('Remittance', accounts => {
         instance.isKilled.call({ from: accounts[0] })
             .then(result => {
                 assert.isFalse(result, "Should not be killed");
+                
                 return instance.kill({ from: accounts[0] });
             })
             .then(txInfo => instance.isKilled.call({ from: accounts[0] }))
@@ -115,38 +133,66 @@ contract('Remittance', accounts => {
 
     it("Should withdraw deposit with passwords", () => {
         var instance = remittance;
-        var accountBalanceStep0 = web3.eth.getBalance(accounts[1]);
+        var accountBalanceStep0;
         var accountBalanceStep1;
         var accountBalanceStep2;
         var hash1 = keccak256("test");
+        var web3GasPrice;
+        var withdrawTxInfo1;
+        var withdrawTxInfo2;
 
-        instance.deposit(hash1, 12, { from: accounts[0], value: 1000 })
-            .then(txInfo => instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3.eth.gasPrice }))
+        getGasPrice()
+            .then(_gasPrice => {
+                web3GasPrice = _gasPrice;
+
+                return getBalance(accounts[1]);
+            })
+            .then(balance => {
+                accountBalanceStep0 = balance;
+
+                return instance.deposit(hash1, 12, { from: accounts[0], value: 1000 });
+            })
+            .then(txInfo => instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice }))
             .then(txInfo => {
-                accountBalanceStep1 = web3.eth.getBalance(accounts[1]);
+                withdrawTxInfo1 = txInfo;
+
+                return getBalance(accounts[1]);
+            })
+            .then(balance => {
+                accountBalanceStep1 = balance;
 
                 assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(txInfo)).add(990),
+                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, gasPrice)).add(990),
                     "Balance is wrong after first withdraw");
 
-                return instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3.eth.gasPrice });
+                return instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice });
             })
             .then(txInfo => {
-                accountBalanceStep2 = web3.eth.getBalance(accounts[1]);
+                withdrawTxInfo2 = txInfo;
+
+                return getBalance(accounts[1]);
+            })
+            .then(balance => {
+                accountBalanceStep2 = balance;
 
                 assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(txInfo)),
+                    accountBalanceStep1.sub(getGasCost(txInfo, gasPrice)),
                     "Balance is wrong after second withdraw");
             })
     });
 
     it("Should not withdraw expired deposit with passwords", () => {
         var instance = remittance;
-        var accountBalanceStep0 = web3.eth.getBalance(accounts[1]);
+        var accountBalanceStep0;
         var accountBalanceStep1;
         var hash1 = keccak256("test");
 
-        instance.deposit(hash1, 0, { from: accounts[0], value: 1000 })
+        getBalance(accounts[1])
+            .then(balance => {
+                accountBalanceStep0 = balance;
+
+                return instance.deposit(hash1, 0, { from: accounts[0], value: 1000 });
+            })
             .then(txInfo => expectedExceptionPromise(() =>
                 instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[0], gas: 3000000 }), 3000000))
     });
@@ -157,27 +203,46 @@ contract('Remittance', accounts => {
         var accountBalanceStep1;
         var accountBalanceStep2;
         var hash1 = keccak256("test");
+        var web3GasPrice;
+        var withdrawTxInfo1;
+        var withdrawTxInfo2;
 
-        instance.deposit(hash1, 0, { from: accounts[0], value: 1000 })
-            .then(txInfo => {
-                accountBalanceStep0 = web3.eth.getBalance(accounts[0]);
+        getGasPrice()
+            .then(_gasPrice => {
+                web3GasPrice = _gasPrice;
 
-                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3.eth.gasPrice });
+                return instance.deposit(hash1, 0, { from: accounts[0], value: 1000 });
+            })
+            .then(txInfo => getBalance(accounts[0]))
+            .then(balance => {
+                accountBalanceStep0 = balance;
+
+                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
             })
             .then(txInfo => {
-                accountBalanceStep1 = web3.eth.getBalance(accounts[0]);
+                withdrawTxInfo1 = txInfo;
+
+                return getBalance(accounts[0]);
+            })
+            .then(balance => {
+                accountBalanceStep1 = balance;
 
                 assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(txInfo)).add(990),
+                    accountBalanceStep0.sub(getGasCost(txInfo, gasPrice)).add(990),
                     "Balance is wrong after first withdraw");
 
-                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3.eth.gasPrice });
+                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
             })
             .then(txInfo => {
-                accountBalanceStep2 = web3.eth.getBalance(accounts[0]);
+                withdrawTxInfo2 = txInfo;
+
+                return getBalance(accounts[0]);
+            })
+            .then(balance => {
+                accountBalanceStep2 = balance;
 
                 assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(txInfo)),
+                    accountBalanceStep1.sub(getGasCost(txInfo, gasPrice)),
                     "Balance is wrong after second withdraw");
             })
     });
@@ -192,8 +257,9 @@ contract('Remittance', accounts => {
         var hash1 = keccak256("test");
 
         instance.deposit(hash1, 1, { from: accounts[0], value: 1000 })
-            .then(txInfo => {
-                accountBalanceStep0 = web3.eth.getBalance(accounts[0]);
+            .then(txInfo => getBalance(accounts[0]))
+            .then(balance => {
+                accountBalanceStep0 = balance;
 
                 // return instance.depositedFees.call({ from: accounts[0] });
             })

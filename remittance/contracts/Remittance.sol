@@ -45,9 +45,7 @@ contract Remittance {
         deposits[msg.sender][oldPswsHash] = Deposit(0, 0, 0);
     }
 
-    function deposit(bytes32 pswsHash, uint hoursDuration) payable {
-        uint duration = hoursDuration * 1 hours;
-        
+    function deposit(bytes32 pswsHash, uint duration) payable {
         require(!isKilled);
         require(duration <= MAX_DURATION);
         require(deposits[msg.sender][pswsHash].balance == 0);

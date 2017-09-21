@@ -9,7 +9,7 @@ contract Remittance {
     }
 
     // Consts.
-    uint constant MAX_DEPOSIT_COST = 0.1 finney; //evaluate this
+    uint constant MAX_DEPOSIT_COST = 0.1 finney;
     uint constant MAX_THOUSANDTHS_COST = 10; //1%
     uint constant MAX_DURATION = 31 days;
 

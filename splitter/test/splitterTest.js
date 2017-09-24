@@ -1,3 +1,5 @@
+"use strict";
+
 const expectedExceptionPromise = require("../../helpers/test/expectedExceptionPromise.js");
 const promisify = require('js-promisify');
 const Splitter = artifacts.require("./Splitter.sol");
@@ -7,99 +9,65 @@ contract('Splitter', accounts => {
     const address2 = "0x79D5D78b75469d06f06ce56A69890eDe014112E9";
     const getGasCost = (txInfo, gasPrice) => gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
 
-    var instance;
+    let instance;
     
-    beforeEach(() => Splitter.new()
-        .then(_instance => instance = _instance));
+    beforeEach(async () => instance = await Splitter.new());
 
-    it("Should set owner", () => {
-        return instance.owner.call({ from: accounts[0] })
-            .then(result => assert.equal(result, accounts[0], "Owner is wrong"))
+    it("should set owner", async () => {
+        let owner = await instance.owner.call({ from: accounts[0] });
+        assert.equal(owner, accounts[0], "Owner is wrong");
     });
 
-    it("Should kill from owner", () => {
-        return instance.isKilled.call({ from: accounts[0] })
-            .then(result => {
-                assert.isFalse(result, "Should not be killed");
-                return instance.kill({ from: accounts[0] });
-            })
-            .then(txInfo => instance.isKilled.call({ from: accounts[0] }))
-            .then(result => assert.isTrue(result, "Should be killed"))
+    it("should kill from owner", async () => {
+        await instance.kill({ from: accounts[0] });
+        assert.isTrue(await instance.isKilled.call({ from: accounts[0] }), "Is not killed");
     });
 
-    it("Should not kill from not owner", () => {
-        return instance.isKilled.call({ from: accounts[0] })
-            .then(result => {
-                assert.isFalse(result, "Should not be killed");
-                return expectedExceptionPromise(() =>
-                    instance.kill({ from: accounts[1] }));
-            })
+    it("should not kill from not owner", async () => {
+        await expectedExceptionPromise(
+            () => instance.kill({ from: accounts[1], gas: 3000000 }), 3000000);
     });
 
-    it("Should split with addresses", () => {
-        return instance.split(address1, address2, { from: accounts[0], value: 1000 })
-            .then(txInfo => instance.balances.call(address1, { from: accounts[0] }))
-            .then(result => {
-                assert.equal(result, 500, "Address1 balance is wrong");
-                return instance.balances.call(address2, { from: accounts[0] });
-            })
-            .then(result => assert.equal(result, 500, "Address2 balance is wrong"))
+    it("should split", async () => {
+        await instance.split(address1, address2, { from: accounts[0], value: 1000 });
+
+        assert.equal(await instance.balances.call(address1, { from: accounts[0] }),
+            500, "Address1 balance is wrong");
+        assert.equal(await instance.balances.call(address2, { from: accounts[0] }),
+            500, "Address2 balance is wrong");
     });
 
-    it("Should not split if killed", () => {
-        return instance.kill({ from: accounts[0] })
-            .then(txInfo => expectedExceptionPromise(() =>
-                instance.split(address1, address2, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000))
+    it("should not split if killed", async () => {
+        await instance.kill({ from: accounts[0] });
+        await expectedExceptionPromise(() =>
+            instance.split(address1, address2, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
     });
 
-    it("Should not split with wrong receivers", () => {
-        return expectedExceptionPromise(() =>
-                instance.split("", address2, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000)
-            .then(() => expectedExceptionPromise(() =>
-                instance.split(address1, "", { from: accounts[0], value: 1000, gas: 3000000 }), 3000000));
+    it("should not split if wrong receivers", async () => {
+        await expectedExceptionPromise(() =>
+            instance.split("", address2, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
+        await expectedExceptionPromise(() =>
+            instance.split(address1, "", { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
     });
 
-    it("Should withdraw owned balance", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var accountBalanceStep2;
-        var web3GasPrice;
-        var withdrawTxInfo1;
-        var withdrawTxInfo2;
+    it("should withdraw owned balance", async () => {
+        let web3GasPrice = await promisify(web3.eth.getGasPrice, []);
+        let accountBalanceStep0 = await promisify(web3.eth.getBalance, [accounts[1]]);
 
-        return promisify(web3.eth.getGasPrice, [])
-            .then(_gasPrice => {
-                web3GasPrice = _gasPrice;
-                return promisify(web3.eth.getBalance, [accounts[1]]);
-            })
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                return instance.split(accounts[1], accounts[2], { from: accounts[0], value: 1000 })
-            })
-            .then(txInfo => instance.withdraw({ from: accounts[1], gasPrice: web3GasPrice }))
-            .then(txInfo => {
-                withdrawTxInfo1 = txInfo;
-                return promisify(web3.eth.getBalance, [accounts[1]]);
-            })
-            .then(balance => {
-                accountBalanceStep1 = balance;
+        await instance.split(accounts[1], accounts[2], { from: accounts[0], value: 1000 });
+        
+        let withdrawTxInfo1 = await instance.withdraw({ from: accounts[1], gasPrice: web3GasPrice });
+        let accountBalanceStep1 = await promisify(web3.eth.getBalance, [accounts[1]]);
+        
+        assert.deepEqual(accountBalanceStep1,
+            accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(500),
+            "Balance is wrong after first withdraw");
 
-                assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(500),
-                    "Balance is wrong after first withdraw");
-
-                return instance.withdraw({ from: accounts[1], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo2 = txInfo;
-                return promisify(web3.eth.getBalance, [accounts[1]]);
-            })
-            .then(balance => {
-                accountBalanceStep2 = balance;
-
-                assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
-                    "Balance is wrong after second withdraw");
-            })
+        let withdrawTxInfo2 = await instance.withdraw({ from: accounts[1], gasPrice: web3GasPrice });
+        let accountBalanceStep2 = await promisify(web3.eth.getBalance, [accounts[1]]);
+        
+        assert.deepEqual(accountBalanceStep2,
+            accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
+            "Balance is wrong after second withdraw");
     });
 })

@@ -15,7 +15,7 @@ contract Remittance {
 
     // Fields.
     uint public depositedFees;
-    mapping (address => mapping (bytes32 => Deposit)) public deposits; //author => psws hash => ammount
+    mapping (address => mapping (bytes32 => Deposit)) public deposits; //author => psws hash => deposit
     bool public isKilled;
     address public owner;
 
@@ -27,9 +27,9 @@ contract Remittance {
     event WithdrawFeesEvent(uint ammount);
 
     // Modifiers.
-    modifier restricted() {
-        if (msg.sender == owner)
-            _;
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
     }
 
     // Costructor.
@@ -38,36 +38,48 @@ contract Remittance {
     }
 
     // Functions.
-    function changePswsHash(bytes32 oldPswsHash, bytes32 newPswsHash) {
-        ChangedPswsHashEvent(msg.sender, oldPswsHash, newPswsHash);
+    function changePswsHash(bytes32 oldPswsHash, bytes32 newPswsHash)
+        public
+    {
+        require(deposits[msg.sender][newPswsHash].balance == 0);
 
         deposits[msg.sender][newPswsHash] = deposits[msg.sender][oldPswsHash];
-        deposits[msg.sender][oldPswsHash] = Deposit(0, 0, 0);
+        delete deposits[msg.sender][oldPswsHash];
+        
+        ChangedPswsHashEvent(msg.sender, oldPswsHash, newPswsHash);
     }
 
-    function deposit(bytes32 pswsHash, uint duration) payable {
+    function deposit(bytes32 pswsHash, uint duration)
+        public
+        payable
+    {
         require(!isKilled);
         require(duration <= MAX_DURATION);
         require(deposits[msg.sender][pswsHash].balance == 0);
 
-        DepositEvent(msg.sender, pswsHash, msg.value);
-
         uint cost = min(msg.value * MAX_THOUSANDTHS_COST / 1000, MAX_DEPOSIT_COST);
-
         depositedFees += cost;
-        deposits[msg.sender][pswsHash] = Deposit(msg.value - cost, now, now + duration);
+        deposits[msg.sender][pswsHash] = Deposit({
+            balance: msg.value - cost,
+            startDate: now,
+            endDate: now + duration
+        });
+
+        DepositEvent(msg.sender, pswsHash, msg.value);
     }
 
-    function getTotalBalance() constant returns (uint balance) {
-        return this.balance;
-    }
-
-    function kill() restricted {
-        KilledEvent();
+    function kill()
+        public
+        onlyOwner
+    {
         isKilled = true;
+
+        KilledEvent();
     }
 
-    function withdrawDeposit(address author, string psw1, string psw2) {
+    function withdrawDeposit(address author, string psw1, string psw2)
+        public
+    {
         bytes32 pswsHash = keccak256(psw1, psw2);
 
         require(now <= deposits[author][pswsHash].endDate);
@@ -75,32 +87,41 @@ contract Remittance {
         withdrawDepositBalance(author, pswsHash);
     }
 
-    function withdrawExpiredDeposit(bytes32 pswsHash) {
+    function withdrawExpiredDeposit(bytes32 pswsHash)
+        public
+    {
         require(deposits[msg.sender][pswsHash].endDate < now);
 
         withdrawDepositBalance(msg.sender, pswsHash);
     }
 
-    function withdrawFees() restricted {
+    function withdrawFees()
+        public
+        onlyOwner
+    {
         uint amount = depositedFees;
         depositedFees = 0;
+        owner.transfer(amount);
 
         WithdrawFeesEvent(amount);
-
-        owner.transfer(amount);
     }
 
     // Helpers.
-    function min(uint a, uint b) private returns (uint) {
+    function min(uint a, uint b)
+        private
+        returns (uint)
+    {
         return a < b ? a : b;
     }
     
-    function withdrawDepositBalance(address author, bytes32 pswsHash) private {
+    function withdrawDepositBalance(address author, bytes32 pswsHash)
+        private
+    {
         uint ammount = deposits[author][pswsHash].balance;
-        deposits[author][pswsHash].balance = 0;
-
-        WithdrawDepositEvent(author, ammount);
+        delete deposits[author][pswsHash];
 
         msg.sender.transfer(ammount);
+
+        WithdrawDepositEvent(author, ammount);
     }
 }

@@ -1,328 +1,173 @@
-const expectedExceptionPromise = require("../../helpers/test/expected_exception_testRPC_and_geth.js");
+"use strict";
+
+const expectedExceptionPromise = require("../../helpers/test/expectedExceptionPromise.js");
+const promisify = require('js-promisify');
+const sha3 = require('js-sha3');
 const Remittance = artifacts.require("./Remittance.sol");
 
-function promisify(func) {
-    return function promiseFunc(options) {
-        return new Promise(function executor(resolve, reject) {
-            func(options, function cb(err, val) {
-                if (err) {
-                    return reject(err);
-                } else {
-                    return resolve(val);
-                }
-            });
-        });
-    }
-}
-
-function promisifyNoParam(func) {
-    return function promiseFunc() {
-        return new Promise(function executor(resolve, reject) {
-            web3.eth.getGasPrice(function cb(err, val) {
-                if (err) {
-                    return reject(err);
-                } else {
-                    return resolve(val);
-                }
-            });
-        });
-    }
-}
-
 function wait(ms) {
-    var start = Date.now(),
+    let start = Date.now(),
         now = start;
-    while (now - start < ms) {
-      now = Date.now();
-    }
+    while (now - start < ms)
+        now = Date.now();
 }
 
 contract('Remittance', accounts => {
-    const getBalance = promisify(web3.eth.getBalance);
-    const getBlock = promisify(web3.eth.getBlock);
     const getGasCost = (txInfo, gasPrice) => gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
-    const getGasPrice = promisifyNoParam(web3.eth.getGasPrice);
-    const keccak256 = obj => "0x" + require('js-sha3').keccak256(obj);
+    const keccak256 = obj => "0x" + sha3.keccak256(obj);
+    const hash1 = keccak256("test");
+    const hash2 = keccak256("test2");
 
-    var instance;
+    let instance;
 
-    beforeEach(() => Remittance.new()
-        .then(_instance => instance = _instance));
+    beforeEach(async () => instance = await Remittance.new());
 
-    it("Should set owner", () => {
-        return instance.owner.call({ from: accounts[0] })
-            .then(result => assert.equal(result, accounts[0], "Owner is wrong"))
+    it("should set owner", async () => {
+        let owner = await instance.owner.call({ from: accounts[0] });
+        assert.equal(owner, accounts[0], "Owner is wrong");
     });
 
-    it("Should update change password hash", () => {
-        var hash1 = keccak256("test");
-        var hash2 = keccak256("test2");
-        var deposit;
+    it("should update password hash", async () => {
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        let deposit = await instance.deposits.call(accounts[0], hash1, { from: accounts[0] });
 
-        return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 })
-            .then(txInfo => instance.deposits.call(accounts[0], hash1, { from: accounts[0] }))
-            .then(_deposit => {
-                deposit = _deposit;
-                return instance.changePswsHash(hash1, hash2, { from: accounts[0] });
-            })
-            .then(txInfo => instance.deposits.call(accounts[0], hash2, { from: accounts[0] }))
-            .then(_deposit => {
-                assert.deepEqual(_deposit, deposit, "Should be moved");
-                return instance.deposits.call(accounts[0], hash1, { from: accounts[0] });
-            })
-            .then(_deposit => assert.deepEqual(_deposit,
-                [new web3.BigNumber(0), new web3.BigNumber(0), new web3.BigNumber(0)],
-                "Should set to 0 on prev hash"));
+        await instance.changePswsHash(hash1, hash2, { from: accounts[0] });
+        
+        assert.deepEqual(
+            await instance.deposits.call(accounts[0], hash2, { from: accounts[0] }),
+            deposit, "Has not been moved");
+        assert.deepEqual(
+            await instance.deposits.call(accounts[0], hash1, { from: accounts[0] }),
+            [new web3.BigNumber(0), new web3.BigNumber(0), new web3.BigNumber(0)],
+            "Previous hash has not been deleted");
     });
 
-    it("Should deposit new founds", () => {
-        var hash1 = keccak256("test");
-        var blockTimestamp;
+    it("should not update password hash if the new hash is already used", async () => {
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        await instance.deposit(hash2, 100, { from: accounts[0], value: 1000 });
 
-        return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 })
-            .then(txInfo => getBlock(txInfo.receipt.blockNumber))
-            .then(block => {
-                blockTimestamp = block.timestamp;
-                return instance.deposits.call(accounts[0], hash1, { from: accounts[0] });
-            })
-            .then(_deposit => {
-                assert.deepEqual(_deposit,
-                    [new web3.BigNumber(990 /* 1000 - 1% */),
-                     new web3.BigNumber(blockTimestamp),
-                     new web3.BigNumber(blockTimestamp + 100)],
-                    "Should set deposit");
-                return instance.depositedFees.call({ from: accounts[0] });
-            })
-            .then(_fees => assert.deepEqual(_fees, new web3.BigNumber(10), "Should deposit fees"));
+        await expectedExceptionPromise(() =>
+            instance.changePswsHash(hash1, hash2, { from: accounts[0], gas: 3000000 }), 3000000);
+    })
+
+    it("should deposit new founds", async () => {
+        let depositTx = await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        let depositBlock = await promisify(web3.eth.getBlock, [depositTx.receipt.blockNumber]);
+        let blockTimestamp = depositBlock.timestamp;
+
+        assert.deepEqual(await instance.deposits.call(accounts[0], hash1, { from: accounts[0] }),
+            [new web3.BigNumber(990 /* 1000 - 1% */),
+             new web3.BigNumber(blockTimestamp),
+             new web3.BigNumber(blockTimestamp + 100)],
+            "Didn't create deposit");
+        assert.deepEqual(await instance.depositedFees.call({ from: accounts[0] }),
+            new web3.BigNumber(10), "Fees has not been deposited");
     });
 
-    it("Should not deposit if killed", () => {
-        var hash1 = keccak256("test");
-
-        return instance.kill({ from: accounts[0] })
-            .then(txInfo => expectedExceptionPromise(() =>
-                instance.deposit(hash1, 100, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000));
+    it("should not deposit if killed", async () => {
+        await instance.kill({ from: accounts[0] });
+        await expectedExceptionPromise(() =>
+            instance.deposit(hash1, 100, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
     });
     
-    it("Should not deposit if duration is over max limit", () => {
-        var hash1 = keccak256("test");
-
-        return expectedExceptionPromise(() =>
+    it("should not deposit if duration is over max limit", async () => {
+        await expectedExceptionPromise(() =>
             instance.deposit(hash1, 5184000 /*60 days*/, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000)
     });
     
-    it("Should not deposit if already deposited", () => {
-        var hash1 = keccak256("test");
-
-        return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 })
-            .then(txInfo => expectedExceptionPromise(() =>
-                instance.deposit(hash1, 100, { from: accounts[0], value: 2000, gas: 3000000 }), 3000000));
+    it("should not deposit if already deposited", async () => {
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        await expectedExceptionPromise(() =>
+            instance.deposit(hash1, 100, { from: accounts[0], value: 2000, gas: 3000000 }), 3000000);
     });
 
-    it("Should kill from owner", () => {
-        return instance.isKilled.call({ from: accounts[0] })
-            .then(result => {
-                assert.isFalse(result, "Should not be killed");
-                return instance.kill({ from: accounts[0] });
-            })
-            .then(txInfo => instance.isKilled.call({ from: accounts[0] }))
-            .then(result => assert.isTrue(result, "Should be killed"))
+    it("should be killed from owner", async () => {
+        await instance.kill({ from: accounts[0] });
+        assert.isTrue(await instance.isKilled.call({ from: accounts[0] }), "Has not been killed")
     });
 
-    it("Should not kill from not owner", () => {
-        return instance.isKilled.call({ from: accounts[0] })
-            .then(result => {
-                assert.isFalse(result, "Should not be killed");
-                return instance.kill({ from: accounts[1] });
-            })
-            .then(txInfo => instance.isKilled.call({ from: accounts[0] }))
-            .then(result => assert.isFalse(result, "Should not be killed"))
+    it("should not be killed from not owner", async () => {
+        await expectedExceptionPromise(() =>
+            instance.kill({ from: accounts[1], gas: 3000000 }), 3000000);
     });
 
-    it("Should withdraw deposit with passwords", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var accountBalanceStep2;
-        var hash1 = keccak256("test");
-        var web3GasPrice;
-        var withdrawTxInfo1;
-        var withdrawTxInfo2;
+    it("should withdraw deposit with passwords", async () => {
+        let web3GasPrice = await promisify(web3.eth.getGasPrice, []);
+        let accountBalanceStep0 = await promisify(web3.eth.getBalance, [accounts[1]]);
 
-        return getGasPrice()
-            .then(_gasPrice => {
-                web3GasPrice = _gasPrice;
-                return getBalance(accounts[1]);
-            })
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
-            })
-            .then(txInfo => instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice }))
-            .then(txInfo => {
-                withdrawTxInfo1 = txInfo;
-                return getBalance(accounts[1]);
-            })
-            .then(balance => {
-                accountBalanceStep1 = balance;
-                assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(990),
-                    "Balance is wrong after first withdraw");
-                return instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo2 = txInfo;
-                return getBalance(accounts[1]);
-            })
-            .then(balance => {
-                accountBalanceStep2 = balance;
-                assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
-                    "Balance is wrong after second withdraw");
-            })
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        
+        let withdrawTxInfo1 = await instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice });
+        let accountBalanceStep1 = await promisify(web3.eth.getBalance, [accounts[1]]);
+
+        assert.deepEqual(accountBalanceStep1,
+            accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(990),
+            "Balance is wrong after first withdraw");
+
+        await expectedExceptionPromise(() =>
+            instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[1], gasPrice: web3GasPrice, gas: 3000000 }), 3000000);
     });
 
-    it("Should not withdraw expired deposit with passwords", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var hash1 = keccak256("test");
+    it("should not withdraw with passwords if expired", async () => {
+        await instance.deposit(hash1, 1, { from: accounts[0], value: 1000 });
+        wait(2000);
 
-        return getBalance(accounts[1])
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                return instance.deposit(hash1, 1, { from: accounts[0], value: 1000 });
-            })
-            .then(txInfo => {
-                wait(2000);
-                return expectedExceptionPromise(() =>
-                    instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[0], gas: 3000000 }), 3000000);
-            })
+        await expectedExceptionPromise(() =>
+            instance.withdrawDeposit(accounts[0], "te", "st", { from: accounts[0], gas: 3000000 }), 3000000);
     });
 
-    it("Should withdraw expired deposit if author", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var accountBalanceStep2;
-        var hash1 = keccak256("test");
-        var web3GasPrice;
-        var withdrawTxInfo1;
-        var withdrawTxInfo2;
+    it("should withdraw deposit as expired if author", async () => {
+        let web3GasPrice = await promisify(web3.eth.getGasPrice, []);
 
-        return getGasPrice()
-            .then(_gasPrice => {
-                web3GasPrice = _gasPrice;
-                return instance.deposit(hash1, 1, { from: accounts[0], value: 1000 });
-            })
-            .then(txInfo => getBalance(accounts[0]))
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                wait(2000);
-                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo1 = txInfo;
-                return getBalance(accounts[0]);
-            })
-            .then(balance => {
-                accountBalanceStep1 = balance;
-                assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(990),
-                    "Balance is wrong after first withdraw");
-                return instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo2 = txInfo;
-                return getBalance(accounts[0]);
-            })
-            .then(balance => {
-                accountBalanceStep2 = balance;
-                assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
-                    "Balance is wrong after second withdraw");
-            })
+        await instance.deposit(hash1, 1, { from: accounts[0], value: 1000 });
+        let accountBalanceStep0 = await promisify(web3.eth.getBalance, [accounts[0]]);
+        wait(2000);
+        
+        let withdrawTxInfo1 = await instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
+        let accountBalanceStep1 = await promisify(web3.eth.getBalance, [accounts[0]]);
+        
+        assert.deepEqual(accountBalanceStep1,
+            accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(990),
+            "Balance is wrong after first withdraw");
+
+        let withdrawTxInfo2 = await instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gasPrice: web3GasPrice });
+        let accountBalanceStep2 = await promisify(web3.eth.getBalance, [accounts[0]]);
+        
+        assert.deepEqual(accountBalanceStep2,
+            accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
+            "Balance is wrong after second withdraw");
     });
 
-    it("Should withdraw fees from owner", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var accountBalanceStep2;
-        var hash1 = keccak256("test");
-        var web3GasPrice;
-        var withdrawTxInfo1;
-        var withdrawTxInfo2;
+    it("should not withdraw as expired if not expired", async () => {
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
 
-        return getGasPrice()
-            .then(gasPrice => {
-                web3GasPrice = gasPrice;
-                return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
-            })
-            .then(txInfo => getBalance(accounts[0]))
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                return instance.depositedFees.call({ from: accounts[0] });
-            })
-            .then(fees => {
-                assert.deepEqual(fees, new web3.BigNumber(10), "Fees has not been assigned");
-                return instance.withdrawFees({ from: accounts[0], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo1 = txInfo;
-                return getBalance(accounts[0]);
-            })
-            .then(balance => {
-                accountBalanceStep1 = balance;
-                assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(10),
-                    "Balance is wrong after first withdraw");
-                return instance.depositedFees.call({ from: accounts[0] });
-            })
-            .then(fees => {
-                assert.deepEqual(fees, new web3.BigNumber(0), "Fees has not been cleared");
-                return instance.withdrawFees({ from: accounts[0], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo2 = txInfo;
-                return getBalance(accounts[0]);
-            })
-            .then(balance => {
-                accountBalanceStep2 = balance;
-                assert.deepEqual(accountBalanceStep2,
-                    accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
-                    "Balance is wrong after second withdraw");
-            })
+        await expectedExceptionPromise(() =>
+            instance.withdrawExpiredDeposit(hash1, { from: accounts[0], gas: 3000000 }), 3000000);
     });
 
-    it("Should not withdraw fees from no owner", () => {
-        var accountBalanceStep0;
-        var accountBalanceStep1;
-        var hash1 = keccak256("test");
-        var web3GasPrice;
-        var withdrawTxInfo1;
+    it("should withdraw fees if owner", async () => {
+        let web3GasPrice = await promisify(web3.eth.getGasPrice, []);
 
-        return getGasPrice()
-            .then(gasPrice => {
-                web3GasPrice = gasPrice;
-                return instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
-            })
-            .then(txInfo => getBalance(accounts[1]))
-            .then(balance => {
-                accountBalanceStep0 = balance;
-                return instance.depositedFees.call({ from: accounts[0] });
-            })
-            .then(fees => {
-                assert.deepEqual(fees, new web3.BigNumber(10), "Fees has not been assigned");
-                return instance.withdrawFees({ from: accounts[1], gasPrice: web3GasPrice });
-            })
-            .then(txInfo => {
-                withdrawTxInfo1 = txInfo;
-                return getBalance(accounts[1]);
-            })
-            .then(balance => {
-                accountBalanceStep1 = balance;
-                assert.deepEqual(accountBalanceStep1,
-                    accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)),
-                    "Balance is wrong after first withdraw");
-                return instance.depositedFees.call({ from: accounts[0] });
-            })
-            .then(fees => assert.deepEqual(fees, new web3.BigNumber(10), "Fees has been cleared"))
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+        let accountBalanceStep0 = await promisify(web3.eth.getBalance, [accounts[0]]);
+        
+        assert.deepEqual(await instance.depositedFees.call({ from: accounts[0] }),
+            new web3.BigNumber(10), "Fees has not been assigned");
+
+        let withdrawTxInfo1 = await instance.withdrawFees({ from: accounts[0], gasPrice: web3GasPrice });
+        let accountBalanceStep1 = await promisify(web3.eth.getBalance, [accounts[0]]);
+        
+        assert.deepEqual(accountBalanceStep1,
+            accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(10),
+            "Balance is wrong after first withdraw");
+        assert.deepEqual(await instance.depositedFees.call({ from: accounts[0] }),
+            new web3.BigNumber(0), "Fees has not been cleared");
+    });
+
+    it("should not withdraw fees from no owner", async () => {
+        await instance.deposit(hash1, 100, { from: accounts[0], value: 1000 });
+
+        await expectedExceptionPromise(() =>
+            instance.withdrawFees({ from: accounts[1], gas: 3000000 }), 3000000);
     });
 })

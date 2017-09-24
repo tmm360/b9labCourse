@@ -2,9 +2,6 @@ pragma solidity ^0.4.15;
 
 contract Splitter {
     // Fields.
-    address public bobAddress;
-    address public carolAddress;
-
     mapping (address => uint) public balances;
     bool public isKilled;
     address public owner;
@@ -21,66 +18,52 @@ contract Splitter {
         uint ammount);
 
     // Modifiers.
-    modifier restricted() {
-        if (msg.sender == owner)
-            _;
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
     }
 
     // Costructor.
-    function Splitter(
-        address _bobAddress,
-        address _carolAddress
-    ) {
-        bobAddress = _bobAddress;
-        carolAddress = _carolAddress;
-
+    function Splitter()
+    {
         owner = msg.sender;
     }
 
     // Functions.
-    function getTotalBalance() constant returns (uint balance) {
-        return this.balance;
-    }
-
-    function kill() restricted {
-        KilledEvent();
+    function kill()
+        public
+        onlyOwner
+    {
         isKilled = true;
+
+        KilledEvent();
     }
 
-    function split(address receiver1, address receiver2) payable {
-        //requisites
+    function split(address receiver1, address receiver2)
+        public
+        payable
+    {
         require(!isKilled);
+        require(receiver1 != address(0));
+        require(receiver2 != address(0));
 
-        //handle case of odd msg.value (why handle 0.5 wei?)
         uint receiver1Value = msg.value / 2;
         uint receiver2Value = msg.value - receiver1Value;
 
-        //events
-        SplitEvent(
-            msg.sender,
-            receiver1,
-            receiver2,
-            msg.value);
-
-        //split
         balances[receiver1] += receiver1Value;
         balances[receiver2] += receiver2Value;
+
+        SplitEvent(msg.sender, receiver1, receiver2, msg.value);
     }
 
-    function withdraw() {
-        //get
+    function withdraw()
+        public
+    {
         uint amount = balances[msg.sender];
         balances[msg.sender] = 0;
 
-        //events
-        WithdrawEvent(msg.sender, amount);
-
-        //withdraw
         msg.sender.transfer(amount);
-    }
 
-    //deafult
-    function () payable {
-        split(bobAddress, carolAddress);
+        WithdrawEvent(msg.sender, amount);
     }
 }

@@ -1,4 +1,5 @@
-module.exports = function expectedExceptionPromise(action, gasToUse) {
+module.exports = function expectedExceptionPromise(action, gasToUse)
+{
     return new Promise(function (resolve, reject) {
             try {
                 resolve(action());
@@ -30,4 +31,4 @@ module.exports = function expectedExceptionPromise(action, gasToUse) {
                 throw e;
             }
         });
-    };
+};

@@ -4,6 +4,7 @@ contract Remittance {
     // Structs.
     struct Deposit {
         uint balance;
+        address receiver;
         uint startDate;
         uint endDate;
     }
@@ -57,7 +58,7 @@ contract Remittance {
         return true;
     }
 
-    function deposit(bytes32 pswsHash, uint duration)
+    function deposit(bytes32 pswsHash, uint duration, address receiver)
         public
         onlyIfRunning
         payable
@@ -70,6 +71,7 @@ contract Remittance {
         depositedFees += cost;
         deposits[msg.sender][pswsHash] = Deposit({
             balance: msg.value - cost,
+            receiver: receiver,
             startDate: now,
             endDate: now + duration
         });
@@ -96,8 +98,10 @@ contract Remittance {
         returns (bool success)
     {
         bytes32 pswsHash = keccak256(psw1, psw2);
+        Deposit storage dep = deposits[author][pswsHash];
 
-        require(now <= deposits[author][pswsHash].endDate);
+        require(dep.receiver == msg.sender);
+        require(now <= dep.endDate);
 
         withdrawDepositBalance(author, pswsHash);
 

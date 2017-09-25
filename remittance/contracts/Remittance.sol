@@ -16,17 +16,22 @@ contract Remittance {
     // Fields.
     uint public depositedFees;
     mapping (address => mapping (bytes32 => Deposit)) public deposits; //author => psws hash => deposit
-    bool public isKilled;
+    bool public isPaused;
     address public owner;
 
     // Events.
     event ChangedPswsHashEvent(address indexed author, bytes32 indexed oldPswsHash, bytes32 indexed newPswsHash);
     event DepositEvent(address indexed author, bytes32 indexed pswsHash, uint ammount);
-    event KilledEvent();
+    event SetPauseEvent(bool value);
     event WithdrawDepositEvent(address indexed author, uint ammount);
     event WithdrawFeesEvent(uint ammount);
 
     // Modifiers.
+    modifier onlyIfRunning() {
+        require(!isPaused);
+        _;
+    }
+
     modifier onlyOwner() {
         require(msg.sender == owner);
         _;
@@ -40,6 +45,7 @@ contract Remittance {
     // Functions.
     function changePswsHash(bytes32 oldPswsHash, bytes32 newPswsHash)
         public
+        returns (bool success)
     {
         require(deposits[msg.sender][newPswsHash].balance == 0);
 
@@ -47,13 +53,16 @@ contract Remittance {
         delete deposits[msg.sender][oldPswsHash];
         
         ChangedPswsHashEvent(msg.sender, oldPswsHash, newPswsHash);
+
+        return true;
     }
 
     function deposit(bytes32 pswsHash, uint duration)
         public
+        onlyIfRunning
         payable
+        returns (bool success)
     {
-        require(!isKilled);
         require(duration <= MAX_DURATION);
         require(deposits[msg.sender][pswsHash].balance == 0);
 
@@ -66,44 +75,58 @@ contract Remittance {
         });
 
         DepositEvent(msg.sender, pswsHash, msg.value);
+
+        return true;
     }
 
-    function kill()
+    function setPause(bool pause)
         public
         onlyOwner
+        returns (bool success)
     {
-        isKilled = true;
+        isPaused = pause;
 
-        KilledEvent();
+        SetPauseEvent(pause);
+
+        return true;
     }
 
     function withdrawDeposit(address author, string psw1, string psw2)
         public
+        returns (bool success)
     {
         bytes32 pswsHash = keccak256(psw1, psw2);
 
         require(now <= deposits[author][pswsHash].endDate);
 
         withdrawDepositBalance(author, pswsHash);
+
+        return true;
     }
 
     function withdrawExpiredDeposit(bytes32 pswsHash)
         public
+        returns (bool success)
     {
         require(deposits[msg.sender][pswsHash].endDate < now);
 
         withdrawDepositBalance(msg.sender, pswsHash);
+
+        return true;
     }
 
     function withdrawFees()
         public
         onlyOwner
+        returns (bool success)
     {
         uint amount = depositedFees;
         depositedFees = 0;
         owner.transfer(amount);
 
         WithdrawFeesEvent(amount);
+
+        return true;
     }
 
     // Helpers.
@@ -116,6 +139,7 @@ contract Remittance {
     
     function withdrawDepositBalance(address author, bytes32 pswsHash)
         private
+        returns (bool success)
     {
         uint ammount = deposits[author][pswsHash].balance;
         delete deposits[author][pswsHash];
@@ -123,5 +147,7 @@ contract Remittance {
         msg.sender.transfer(ammount);
 
         WithdrawDepositEvent(author, ammount);
+
+        return true;
     }
 }

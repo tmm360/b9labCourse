@@ -64,8 +64,8 @@ contract('Remittance', accounts => {
             new web3.BigNumber(10), "Fees has not been deposited");
     });
 
-    it("should not deposit if killed", async () => {
-        await instance.kill({ from: accounts[0] });
+    it("should not deposit if paused", async () => {
+        await instance.setPause(true, { from: accounts[0] });
         await expectedExceptionPromise(() =>
             instance.deposit(hash1, 100, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
     });
@@ -81,14 +81,19 @@ contract('Remittance', accounts => {
             instance.deposit(hash1, 100, { from: accounts[0], value: 2000, gas: 3000000 }), 3000000);
     });
 
-    it("should be killed from owner", async () => {
-        await instance.kill({ from: accounts[0] });
-        assert.isTrue(await instance.isKilled.call({ from: accounts[0] }), "Has not been killed")
+    it("should be paused from owner", async () => {
+        await instance.setPause(true, { from: accounts[0] });
+        
+        assert.isTrue(await instance.isPaused.call({ from: accounts[0] }), "Has not been paused")
+
+        await instance.setPause(false, { from: accounts[0] });
+        
+        assert.isFalse(await instance.isPaused.call({ from: accounts[0] }), "Has not been unpaused")
     });
 
-    it("should not be killed from not owner", async () => {
+    it("should not be paused from not owner", async () => {
         await expectedExceptionPromise(() =>
-            instance.kill({ from: accounts[1], gas: 3000000 }), 3000000);
+            instance.setPause(true, { from: accounts[1], gas: 3000000 }), 3000000);
     });
 
     it("should withdraw deposit with passwords", async () => {

@@ -18,14 +18,19 @@ contract('Splitter', accounts => {
         assert.equal(owner, accounts[0], "Owner is wrong");
     });
 
-    it("should kill from owner", async () => {
-        await instance.kill({ from: accounts[0] });
-        assert.isTrue(await instance.isKilled.call({ from: accounts[0] }), "Is not killed");
+    it("should pause from owner", async () => {
+        await instance.setPause(true, { from: accounts[0] });
+
+        assert.isTrue(await instance.isPaused.call({ from: accounts[0] }), "Is not paused");
+
+        await instance.setPause(false, { from: accounts[0] });
+
+        assert.isFalse(await instance.isPaused.call({ from: accounts[0] }), "Is still paused");
     });
 
     it("should not kill from not owner", async () => {
         await expectedExceptionPromise(
-            () => instance.kill({ from: accounts[1], gas: 3000000 }), 3000000);
+            () => instance.setPause(true, { from: accounts[1], gas: 3000000 }), 3000000);
     });
 
     it("should split", async () => {
@@ -38,7 +43,7 @@ contract('Splitter', accounts => {
     });
 
     it("should not split if killed", async () => {
-        await instance.kill({ from: accounts[0] });
+        await instance.setPause(true, { from: accounts[0] });
         await expectedExceptionPromise(() =>
             instance.split(address1, address2, { from: accounts[0], value: 1000, gas: 3000000 }), 3000000);
     });
@@ -63,11 +68,7 @@ contract('Splitter', accounts => {
             accountBalanceStep0.sub(getGasCost(withdrawTxInfo1, web3GasPrice)).add(500),
             "Balance is wrong after first withdraw");
 
-        let withdrawTxInfo2 = await instance.withdraw({ from: accounts[1], gasPrice: web3GasPrice });
-        let accountBalanceStep2 = await promisify(web3.eth.getBalance, [accounts[1]]);
-        
-        assert.deepEqual(accountBalanceStep2,
-            accountBalanceStep1.sub(getGasCost(withdrawTxInfo2, web3GasPrice)),
-            "Balance is wrong after second withdraw");
+        await expectedExceptionPromise(() =>
+            instance.withdraw({ from: accounts[1], gas: 3000000 }), 3000000);
     });
 })

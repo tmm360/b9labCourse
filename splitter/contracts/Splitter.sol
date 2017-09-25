@@ -3,11 +3,11 @@ pragma solidity ^0.4.15;
 contract Splitter {
     // Fields.
     mapping (address => uint) public balances;
-    bool public isKilled;
+    bool public isPaused;
     address public owner;
 
     // Events.
-    event KilledEvent();
+    event SetPauseEvent(bool value);
     event SplitEvent(
         address indexed sender,
         address indexed receiver1,
@@ -18,6 +18,11 @@ contract Splitter {
         uint ammount);
 
     // Modifiers.
+    modifier onlyIfRunning() {
+        require(!isPaused);
+        _;
+    }
+
     modifier onlyOwner() {
         require(msg.sender == owner);
         _;
@@ -30,40 +35,50 @@ contract Splitter {
     }
 
     // Functions.
-    function kill()
+    function setPause(bool pause)
         public
         onlyOwner
+        returns (bool success)
     {
-        isKilled = true;
+        isPaused = pause;
 
-        KilledEvent();
+        SetPauseEvent(pause);
+
+        return true;
     }
 
     function split(address receiver1, address receiver2)
         public
+        onlyIfRunning
         payable
+        returns (bool success)
     {
-        require(!isKilled);
         require(receiver1 != address(0));
         require(receiver2 != address(0));
 
-        uint receiver1Value = msg.value / 2;
-        uint receiver2Value = msg.value - receiver1Value;
+        uint half = msg.value / 2;
 
-        balances[receiver1] += receiver1Value;
-        balances[receiver2] += receiver2Value;
+        balances[receiver1] += half;
+        balances[receiver2] += half;
+        balances[msg.sender] += msg.value % 2;
 
         SplitEvent(msg.sender, receiver1, receiver2, msg.value);
+
+        return true;
     }
 
     function withdraw()
         public
+        returns (bool success)
     {
         uint amount = balances[msg.sender];
+        require(amount > 0);
         balances[msg.sender] = 0;
 
         msg.sender.transfer(amount);
 
         WithdrawEvent(msg.sender, amount);
+
+        return true;
     }
 }

@@ -1,8 +1,8 @@
 pragma solidity ^0.4.15;
 
-import "./Owned.sol";
+import "zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 
-contract Shopfront is Owned {
+contract Shopfront is Pausable {
     // Structs.
     struct Product {
         string name;
@@ -25,14 +25,16 @@ contract Shopfront is Owned {
     event UpdatedStockEvent(address indexed seller, bytes32 id, uint stock);
 
     // Modifiers.
-    modifier fromSeller(bytes32 productId) {
+    modifier onlySeller(bytes32 productId) {
         require(products[productId].seller == msg.sender);
         _;
     }
 
     // Functions.
     function addProduct(string name, uint price, uint stock)
-        public returns (bytes32 id)
+        public
+        whenNotPaused()
+        returns (bytes32 id)
     {
         id = keccak256(msg.sender, name);
         require(products[id].seller == address(0)); //check for empty product
@@ -43,57 +45,84 @@ contract Shopfront is Owned {
             seller : msg.sender,
             stock : stock
         });
+
         AddedProductEvent(msg.sender, id);
+        
         return id;
     }
 
     function buyProduct(bytes32 id, uint quantity, address returnAddress)
-        public payable
+        public
+        whenNotPaused()
+        payable
+        returns (bool succeeded)
     {
-        require(products[id].seller != address(0));
-        require(products[id].stock <= quantity);
-        uint totalPrice = products[id].price * quantity;
+        Product product = products[id];
+        require(product.seller != address(0));
+        require(product.stock <= quantity);
+        uint totalPrice = product.price * quantity;
         require(totalPrice <= msg.value);
         require(returnAddress != address(0));
 
-        products[id].stock -= quantity;
+        product.stock -= quantity;
 
         uint fees = totalPrice * THOUSANDTHS_FEES_RATE / 1000;
         totalFees += fees;
-        revenues[products[id].seller] += totalPrice - fees;
+        revenues[product.seller] += totalPrice - fees;
 
         ProductBoughtEvent(msg.sender, id, quantity);
 
         if (msg.value > totalPrice)
             returnAddress.transfer(msg.value - totalPrice);
+        
+        return true;
     }
 
     function removeProduct(bytes32 id)
-        public fromSeller(id)
+        public
+        whenNotPaused()
+        onlySeller(id)
+        returns (bool succeeded)
     {
         delete products[id];
+
+        return true;
     }
 
     function updateStock(bytes32 id, uint stock)
-        public fromSeller(id)
+        public
+        whenNotPaused()
+        onlySeller(id)
+        returns (bool succeeded)
     {
         products[id].stock = stock;
         UpdatedStockEvent(msg.sender, id, stock);
+
+        return true;
     }
 
     function withdrawFees()
-        public fromOwner()
+        public
+        whenNotPaused()
+        onlyOwner()
+        returns (bool succeeded)
     {
         uint fees = totalFees;
         totalFees = 0;
         owner.transfer(fees);
+
+        return true;
     }
 
     function withdrawSellerRevenue()
         public
+        whenNotPaused()
+        returns (bool succeeded)
     {
         uint revenue = revenues[msg.sender];
         revenues[msg.sender] = 0;
         msg.sender.transfer(revenue);
+
+        return true;
     }
 }

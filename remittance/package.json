@@ -12,7 +12,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "js-promisify": "^1.1.0",
-    "js-sha3": "^0.6.1"
+    "bluebird": "^3.5.1"
   }
 }

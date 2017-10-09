@@ -19,12 +19,12 @@ contract CollectHub is Pausable {
     }
 
     // Functions.
-    function newCollect()
+    function newCollect(address receiver)
         public
         whenNotPaused
         returns (address collectContract)
     {
-        Collect trustedCollect = new Collect(msg.sender, shopfrontAddress);
+        Collect trustedCollect = new Collect(msg.sender, receiver, shopfrontAddress);
         collects.push(trustedCollect);
         LogNewCollect(trustedCollect, msg.sender);
         return trustedCollect;

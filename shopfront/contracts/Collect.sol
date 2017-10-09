@@ -11,8 +11,10 @@ contract Collect is Pausable {
     uint public ammount;
     address public author;
     mapping(address => uint) public contribs; //sender => ammount
-    Shopfront public shopfront;
+    address public receiver;
     States public status;
+
+    Shopfront shopfront;
 
     // Events.
     event LogBuyProduct(bytes32 indexed productId);
@@ -25,8 +27,12 @@ contract Collect is Pausable {
     modifier onlyIfActive() { require(status == States.active); _; }
 
     // Constructor.
-    function Collect(address _author, address shopfrontAddress) {
+    function Collect(address _author, address _receiver, address shopfrontAddress) {
+        require(_author != address(0));
+        require(_receiver != address(0));
+
         author = _author;
+        receiver = _receiver;
         shopfront = Shopfront(shopfrontAddress);
     }
 
@@ -38,10 +44,10 @@ contract Collect is Pausable {
         whenNotPaused
         returns (bool success)
     {
-        require(shopfront.getProductPrice(productId) <= ammount);
+        require(shopfront.getProductPriceInWei(productId) <= ammount);
         require(shopfront.getProductStock(productId) >= 1);
 
-        shopfront.buyProduct.value(ammount)(productId, author);
+        shopfront.buyProductWithEther.value(ammount)(productId, author, receiver);
         LogBuyProduct(productId);
 
         status = States.succeeded;

@@ -2,52 +2,53 @@ pragma solidity ^0.4.15;
 
 import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 import "./Collect.sol";
-import "./Shopfront.sol";
 
 contract CollectHub is Pausable {
     // Fields.
-    mapping (bytes32 => Collect) collects;
-    Shopfront shopfront;
+    address[] public collects;
+    address public shopfrontAddress;
+
+    // Events.
+    event LogNewCollect(address indexed collectContract, address indexed author);
+    event LogPausedCollect(address indexed collectContract);
+    event LogUnpausedCollect(address indexed collectContract);
 
     // Constructor.
-    function CollectHub(address shopfrontAddress) {
-        shopfront = Shopfront(shopfrontAddress);
+    function CollectHub(address _shopfrontAddress) {
+        shopfrontAddress = _shopfrontAddress;
     }
 
     // Functions.
-    // function startCollect()
-    //     public
-    //     whenNotPaused()
-    //     payable
-    //     returns (bytes32 id)
-    // {
-    //     id = keccak256(msg.sender, block.number);
-    //     require(collects[id].author == address(0));
-        
-    //     collects[id] = Collect({
-    //         author: msg.sender
-    //     });
-    //     if (msg.value > 0)
-    //         deposit(id);
+    function newCollect()
+        public
+        whenNotPaused
+        returns (address collectContract)
+    {
+        Collect trustedCollect = new Collect(msg.sender, shopfrontAddress);
+        collects.push(trustedCollect);
+        LogNewCollect(trustedCollect, msg.sender);
+        return trustedCollect;
+    }
 
-    //     return id;
-    // }
+    function pauseCollect(address collectAddress)
+        public
+        onlyOwner
+        returns (bool success)
+    {
+        Collect untrustedCollect = Collect(collectAddress);
+        untrustedCollect.pause();
+        LogPausedCollect(untrustedCollect);
+        return true;
+    }
 
-    // function tryBuyProduct(bytes32 id)
-    //     public
-    //     onlyAuthor(id)
-    //     whenNotPaused()
-    //     whenOpenCollect(id)
-    //     returns (bool succeeded)
-    // {
-    //     //***** */
-    // }
-
-    // function withdrawDeposit(bytes32 id)
-    //     public
-    //     whenNotPaused()
-    //     returns (bool succeeded)
-    // {
-    //     /***** */
-    // }
+    function unpauseCollect(address collectAddress)
+        public
+        onlyOwner
+        returns (bool success)
+    {
+        Collect untrustedCollect = Collect(collectAddress);
+        untrustedCollect.unpause();
+        LogUnpausedCollect(untrustedCollect);
+        return true;
+    }
 }

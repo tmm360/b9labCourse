@@ -5,7 +5,7 @@ import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 contract Shopfront is Pausable {
     // Structs.
     struct Product {
-        uint internalId;
+        uint internalId; //used for search product info on seller's db
         uint price;
         address seller;
         uint stock;
@@ -74,6 +74,22 @@ contract Shopfront is Pausable {
             untrustedReturnAddress.transfer(msg.value - product.price);
         
         return true;
+    }
+
+    function getProductPrice(bytes32 id)
+        public
+        constant
+        returns (uint price)
+    {
+        return products[id].price;
+    }
+
+    function getProductStock(bytes32 id)
+        public
+        constant
+        returns (uint stock)
+    {
+        return products[id].stock;
     }
 
     function removeProduct(bytes32 id)

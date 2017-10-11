@@ -1,11 +1,12 @@
 pragma solidity ^0.4.15;
 
+import "../installed_contracts/oraclize/contracts/usingOraclize.sol";
 import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 import "./MetaCoinERC20.sol";
 
-contract Shopfront is Pausable {
+contract Shopfront is Pausable, usingOraclize {
     // Enums.
-    enum CoinTypes { Ether, MetaCoin }
+    enum CoinTypes { Ether, MetaCoin, USD }
 
     // Structs.
     struct CoinInfo {
@@ -28,14 +29,16 @@ contract Shopfront is Pausable {
     mapping (bytes32 => Product) public products; //id -> product
     mapping (bytes32 => mapping (address => uint)) public revenues; // hash(coinType) -> seller -> ammount
     mapping (bytes32 => uint) public totalFees; // hash(coinType) -> fees
+    mapping (bytes32=>bool) validOraclizeIds;
 
     MetaCoinERC20 trustedMetaCoinContract;
 
     // Events.
     event LogAddedProduct(address indexed seller, bytes32 indexed id);
+    event LogNewOraclizeQuery(string description);
     event LogProductBought(address indexed buyer, address indexed receiver, bytes32 indexed id, CoinTypes coinType);
     event LogProductRemoved(address indexed seller, bytes32 indexed id);
-    event LogUpdateCoinValue(CoinTypes indexed coinType, uint value);
+    event LogUpdateCoinValue(CoinTypes indexed coinType, uint8 decimals, uint value);
     event LogUpdatedStock(address indexed seller, bytes32 indexed id, uint stock);
     event LogWithdrawFees(uint ammount, CoinTypes coinType);
     event LogWithdrawSellerRevenue(address indexed seller, CoinTypes coinType, uint ammount);
@@ -46,6 +49,7 @@ contract Shopfront is Pausable {
         require(products[id].stock >= 1);           //check availability
         _;
     }
+    modifier onlyOraclize() { require(oraclize_cbAddress() == msg.sender); _; }
     modifier onlySeller(bytes32 id) { require(products[id].seller == msg.sender); _; }
 
     // Constructor.
@@ -166,7 +170,7 @@ contract Shopfront is Pausable {
         require(currentValue != value);
 
         coinInfo[coinHash].value = value;
-        LogUpdateCoinValue(CoinTypes.MetaCoin, value);
+        LogUpdateCoinValue(CoinTypes.MetaCoin, 18, value);
         return true;
     }
 
@@ -180,6 +184,23 @@ contract Shopfront is Pausable {
 
         products[id].stock = stock;
         LogUpdatedStock(msg.sender, id, stock);
+        return true;
+    }
+
+    function updateUSDPrice()
+        public
+        onlyOwner
+        payable
+        returns (bool success)
+    {
+        if (oraclize_getPrice("URL") > this.balance) {
+            LogNewOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
+        } else {
+            LogNewOraclizeQuery("Oraclize query was sent, standing by for the answer..");
+            bytes32 queryId =
+                oraclize_query("URL", "json(https://api.coinmarketcap.com/v1/ticker/ethereum/).price_usd");
+            validOraclizeIds[queryId] = true;
+        }
         return true;
     }
 
@@ -248,6 +269,27 @@ contract Shopfront is Pausable {
         LogWithdrawSellerRevenue(msg.sender, CoinTypes.MetaCoin, revenue);
         return true;
     }
+    
+    function __callback(bytes32 myid, string result)
+        public
+        onlyOraclize
+    {
+        require(validOraclizeIds[myid]);
+
+        // Update USD value
+        bytes32 coinHash = keccak256(CoinTypes.USD);
+        CoinInfo storage coin = coinInfo[coinHash];
+        uint currentValue = coin.value;
+
+        var (value, decimals) = stringToFloat(result);
+        if (currentValue != value) {
+            coin.decimals = uint8(decimals);
+            coin.value = value;
+            LogUpdateCoinValue(CoinTypes.MetaCoin, uint8(decimals), value);
+        }
+
+        delete validOraclizeIds[myid];
+    }
 
     // Helpers.
     function convertValueFromWei(uint value, bytes32 destCoinHash)
@@ -284,5 +326,27 @@ contract Shopfront is Pausable {
         LogProductBought(msg.sender, receiver, id, coinType);
 
         return true;
+    }
+
+    function stringToFloat(string s)
+        private
+        constant
+        returns (uint value, uint decimals)
+    {
+        bytes memory b = bytes(s);
+        uint i;
+        bool countingDecimals = false;
+        value = 0;
+        decimals = 0;
+        for (i = 0; i < b.length; i++) {
+            uint c = uint(b[i]);
+            if (c == 46)
+                countingDecimals = true;
+            else if (c >= 48 && c <= 57) {
+                value = value * 10 + (c - 48);
+                if (countingDecimals)
+                    decimals++;
+            }
+        }
     }
 }

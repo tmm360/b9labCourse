@@ -25,13 +25,13 @@ contract Shopfront is Pausable, usingOraclize {
     uint constant THOUSANDTHS_FEES_RATE = 50; // 5%
 
     // Fields.
-    mapping (bytes32 => CoinInfo) coinInfo; // hash(coinType) -> coin info
+    mapping (bytes32 => CoinInfo) public coinInfo; // hash(coinType) -> coin info
     mapping (bytes32 => Product) public products; //id -> product
     mapping (bytes32 => mapping (address => uint)) public revenues; // hash(coinType) -> seller -> ammount
     mapping (bytes32 => uint) public totalFees; // hash(coinType) -> fees
-    mapping (bytes32=>bool) validOraclizeIds;
 
     MetaCoinERC20 trustedMetaCoinContract;
+    mapping (bytes32=>bool) validOraclizeIds;
 
     // Events.
     event LogAddedProduct(address indexed seller, bytes32 indexed id);
@@ -282,11 +282,9 @@ contract Shopfront is Pausable, usingOraclize {
         uint currentValue = coin.value;
 
         var (value, decimals) = stringToFloat(result);
-        if (currentValue != value) {
-            coin.decimals = uint8(decimals);
-            coin.value = value;
-            LogUpdateCoinValue(CoinTypes.MetaCoin, uint8(decimals), value);
-        }
+        coin.decimals = uint8(decimals);
+        coin.value = value;
+        LogUpdateCoinValue(CoinTypes.MetaCoin, uint8(decimals), value);
 
         delete validOraclizeIds[myid];
     }

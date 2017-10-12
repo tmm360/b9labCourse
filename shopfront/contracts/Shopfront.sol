@@ -198,7 +198,7 @@ contract Shopfront is Pausable, usingOraclize {
         } else {
             LogNewOraclizeQuery("Oraclize query was sent, standing by for the answer..");
             bytes32 queryId =
-                oraclize_query("URL", "json(https://api.coinmarketcap.com/v1/ticker/ethereum/).price_usd");
+                oraclize_query("URL", "json(https://api.coinmarketcap.com/v1/ticker/ethereum/).0.price_usd");
             validOraclizeIds[queryId] = true;
         }
         return true;
@@ -279,12 +279,11 @@ contract Shopfront is Pausable, usingOraclize {
         // Update USD value
         bytes32 coinHash = keccak256(CoinTypes.USD);
         CoinInfo storage coin = coinInfo[coinHash];
-        uint currentValue = coin.value;
 
         var (value, decimals) = stringToFloat(result);
         coin.decimals = uint8(decimals);
         coin.value = value;
-        LogUpdateCoinValue(CoinTypes.MetaCoin, uint8(decimals), value);
+        LogUpdateCoinValue(CoinTypes.USD, uint8(decimals), value);
 
         delete validOraclizeIds[myid];
     }

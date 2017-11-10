@@ -23,6 +23,7 @@ contract Splitter {
 
     // Costructor.
     function Splitter()
+        public
     {
         owner = msg.sender;
     }

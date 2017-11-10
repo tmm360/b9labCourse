@@ -1,4 +1,4 @@
-pragma solidity ^0.4.15;
+pragma solidity ^0.4.13;
 
 import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 import "./Collect.sol";

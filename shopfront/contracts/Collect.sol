@@ -1,4 +1,4 @@
-pragma solidity ^0.4.15;
+pragma solidity ^0.4.13;
 
 import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
 import "./Shopfront.sol";
@@ -45,7 +45,6 @@ contract Collect is Pausable {
         returns (bool success)
     {
         require(shopfront.getProductPriceInWei(productId) <= ammount);
-        require(shopfront.getProductStock(productId) >= 1);
 
         shopfront.buyProductWithEther.value(ammount)(productId, author, receiver);
         LogBuyProduct(productId);

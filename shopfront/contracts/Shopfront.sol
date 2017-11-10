@@ -1,4 +1,4 @@
-pragma solidity ^0.4.15;
+pragma solidity ^0.4.13;
 
 import "../installed_contracts/oraclize/contracts/usingOraclize.sol";
 import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
@@ -15,13 +15,14 @@ contract Shopfront is Pausable, usingOraclize {
     }
     struct Product {
         bool acceptMetaCoin;
-        uint internalId; //used for search product info on seller's db
         uint price;
         address seller;
         uint stock;
     }
 
     // Consts.
+    uint8 constant ETHER_DECIMALS = 18;
+    uint8 constant METACOIN_DECIMALS = 18;
     uint constant THOUSANDTHS_FEES_RATE = 50; // 5%
 
     // Fields.
@@ -34,8 +35,8 @@ contract Shopfront is Pausable, usingOraclize {
     mapping (bytes32=>bool) validOraclizeIds;
 
     // Events.
-    event LogAddedProduct(address indexed seller, bytes32 indexed id);
-    event LogNewOraclizeQuery(string description);
+    event LogAddedProduct(address indexed seller, bytes32 indexed id, uint indexed internalId);
+    event LogNewOraclizeQuery(bytes32 indexed queryId, uint msgValue);
     event LogProductBought(address indexed buyer, address indexed receiver, bytes32 indexed id, CoinTypes coinType);
     event LogProductRemoved(address indexed seller, bytes32 indexed id);
     event LogUpdateCoinValue(CoinTypes indexed coinType, uint8 decimals, uint value);
@@ -45,8 +46,7 @@ contract Shopfront is Pausable, usingOraclize {
 
     // Modifiers.
     modifier onlyIfAvailable(bytes32 id) {
-        require(products[id].seller != address(0)); //check existence
-        require(products[id].stock >= 1);           //check availability
+        require(products[id].stock >= 1); //check availability
         _;
     }
     modifier onlyOraclize() { require(oraclize_cbAddress() == msg.sender); _; }
@@ -54,15 +54,16 @@ contract Shopfront is Pausable, usingOraclize {
 
     // Constructor.
     function Shopfront(address metaCoinAddress) {
+        require(metaCoinAddress != address(0));
         trustedMetaCoinContract = MetaCoinERC20(metaCoinAddress);
 
         // Init coin values.
         coinInfo[keccak256(CoinTypes.Ether)] = CoinInfo({
-            decimals : 18,
+            decimals : ETHER_DECIMALS,
             value : 1 // 1 ether = 1 ether
         });
         coinInfo[keccak256(CoinTypes.MetaCoin)] = CoinInfo({
-            decimals : 18,
+            decimals : METACOIN_DECIMALS,
             value : 100 // 100 MetaCoin = 1 ether
         });
     }
@@ -78,13 +79,12 @@ contract Shopfront is Pausable, usingOraclize {
 
         products[id] = Product({
             acceptMetaCoin : acceptMetaCoin,
-            internalId : internalId,
             price : price,
             seller : msg.sender,
             stock : stock
         });
 
-        LogAddedProduct(msg.sender, id);
+        LogAddedProduct(msg.sender, id, internalId);
         return id;
     }
 
@@ -115,11 +115,11 @@ contract Shopfront is Pausable, usingOraclize {
     {
         require(products[id].acceptMetaCoin);
 
+        processPurchase(id, CoinTypes.MetaCoin, receiver);
+
         // Don't need to check token availability, because if "ERC20 allowance < price" transfer fails.
         trustedMetaCoinContract.transferFrom(msg.sender, this,
             convertValueFromWei(products[id].price, keccak256(CoinTypes.MetaCoin)));
-
-        processPurchase(id, CoinTypes.MetaCoin, receiver);
 
         return true;
     }
@@ -170,7 +170,7 @@ contract Shopfront is Pausable, usingOraclize {
         require(currentValue != value);
 
         coinInfo[coinHash].value = value;
-        LogUpdateCoinValue(CoinTypes.MetaCoin, 18, value);
+        LogUpdateCoinValue(CoinTypes.MetaCoin, METACOIN_DECIMALS, value);
         return true;
     }
 
@@ -193,14 +193,11 @@ contract Shopfront is Pausable, usingOraclize {
         payable
         returns (bool success)
     {
-        if (oraclize_getPrice("URL") > this.balance) {
-            LogNewOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
-        } else {
-            LogNewOraclizeQuery("Oraclize query was sent, standing by for the answer..");
-            bytes32 queryId =
-                oraclize_query("URL", "json(https://api.coinmarketcap.com/v1/ticker/ethereum/).0.price_usd");
-            validOraclizeIds[queryId] = true;
-        }
+        bytes32 queryId =
+            oraclize_query("URL", "json(https://api.coinmarketcap.com/v1/ticker/ethereum/).0.price_usd");
+        LogNewOraclizeQuery(queryId, msg.value);
+        validOraclizeIds[queryId] = true;
+        
         return true;
     }
 
@@ -280,10 +277,9 @@ contract Shopfront is Pausable, usingOraclize {
         bytes32 coinHash = keccak256(CoinTypes.USD);
         CoinInfo storage coin = coinInfo[coinHash];
 
-        var (value, decimals) = stringToFloat(result);
-        coin.decimals = uint8(decimals);
-        coin.value = value;
-        LogUpdateCoinValue(CoinTypes.USD, uint8(decimals), value);
+        coin.decimals = ETHER_DECIMALS; //arbitrary cast for simplify maths
+        coin.value = parseInt(result, ETHER_DECIMALS);
+        LogUpdateCoinValue(CoinTypes.USD, coin.decimals, coin.value);
 
         delete validOraclizeIds[myid];
     }
@@ -296,10 +292,10 @@ contract Shopfront is Pausable, usingOraclize {
     {
         uint destCoinValue = coinInfo[destCoinHash].value;
         uint8 destCoinDecimals = coinInfo[destCoinHash].decimals;
-        if (destCoinDecimals >= 18 /*ether decimals*/) {
-            return value * destCoinValue * (10 ** uint(destCoinDecimals - 18));
+        if (destCoinDecimals >= ETHER_DECIMALS) {
+            return value * destCoinValue * (10 ** uint(destCoinDecimals - ETHER_DECIMALS));
         } else {
-            return value * destCoinValue / (10 ** uint(18 - destCoinDecimals));
+            return value * destCoinValue / (10 ** uint(ETHER_DECIMALS - destCoinDecimals));
         }
     }
 
@@ -323,27 +319,5 @@ contract Shopfront is Pausable, usingOraclize {
         LogProductBought(msg.sender, receiver, id, coinType);
 
         return true;
-    }
-
-    function stringToFloat(string s)
-        private
-        constant
-        returns (uint value, uint decimals)
-    {
-        bytes memory b = bytes(s);
-        uint i;
-        bool countingDecimals = false;
-        value = 0;
-        decimals = 0;
-        for (i = 0; i < b.length; i++) {
-            uint c = uint(b[i]);
-            if (c == 46)
-                countingDecimals = true;
-            else if (c >= 48 && c <= 57) {
-                value = value * 10 + (c - 48);
-                if (countingDecimals)
-                    decimals++;
-            }
-        }
     }
 }

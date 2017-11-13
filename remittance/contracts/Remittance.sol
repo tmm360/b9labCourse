@@ -38,6 +38,14 @@ contract Remittance {
     }
 
     // Functions.
+    function createDepHash(string psw1, string psw2, address addr)
+        public
+        constant
+        returns (bytes32 depHash)
+    {
+        return keccak256(psw1, psw2, addr);
+    }
+
     function deposit(bytes32 depHash, uint duration)
         public
         onlyIfRunning
@@ -76,7 +84,7 @@ contract Remittance {
         public
         returns (bool success)
     {
-        bytes32 depHash = keccak256(psw1, psw2, msg.sender);
+        bytes32 depHash = createDepHash(psw1, psw2, msg.sender);
         require(deposits[depHash].balance > 0);
         require(now <= deposits[depHash].endDate);
 

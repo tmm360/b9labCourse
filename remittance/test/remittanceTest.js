@@ -8,12 +8,15 @@ Promise.promisifyAll(web3.eth);
 
 contract('Remittance', accounts => {
     const getGasCost = (txInfo, gasPrice) => gasPrice.mul(txInfo.receipt.cumulativeGasUsed);
-    // const account1Hash = web3.sha3(accounts[1], {encoding: 'hex'});
-    const depHash = web3.sha3("test", accounts[1]); //failing because https://github.com/tmm360/b9labCourse/commit/2527fd38fd5551c9b8e999b24bcf8b6cca01ab8f#commitcomment-25521314
 
+    let depHash;
     let instance;
 
-    beforeEach(async () => instance = await Remittance.new());
+    beforeEach(async () =>
+    {
+        instance = await Remittance.new();
+        depHash = await instance.createDepHash.call("te", "st", accounts[1], { from: accounts[0] });
+    });
 
     it("should have set deployer as owner", async () => {
         let owner = await instance.owner.call({ from: accounts[0] });

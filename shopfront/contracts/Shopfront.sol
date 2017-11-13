@@ -1,10 +1,11 @@
 pragma solidity ^0.4.13;
 
 import "../installed_contracts/oraclize/contracts/usingOraclize.sol";
-import "../node_modules/zeppelin-solidity/contracts/lifecycle/Pausable.sol";
+import "../node_modules/zeppelin-solidity/contracts/payment/PullPayment.sol";
 import "./MetaCoinERC20.sol";
+import "./ProductHolder.sol";
 
-contract Shopfront is Pausable, usingOraclize {
+contract Shopfront is ProductHolder, PullPayment, usingOraclize {
     // Enums.
     enum CoinTypes { Ether, MetaCoin, USD }
 
@@ -13,12 +14,6 @@ contract Shopfront is Pausable, usingOraclize {
         uint8 decimals;
         uint value;
     }
-    struct Product {
-        bool acceptMetaCoin;
-        uint price;
-        address seller;
-        uint stock;
-    }
 
     // Consts.
     uint8 constant ETHER_DECIMALS = 18;
@@ -26,31 +21,18 @@ contract Shopfront is Pausable, usingOraclize {
     uint constant THOUSANDTHS_FEES_RATE = 50; // 5%
 
     // Fields.
-    mapping (bytes32 => CoinInfo) public coinInfo; // hash(coinType) -> coin info
-    mapping (bytes32 => Product) public products; //id -> product
-    mapping (bytes32 => mapping (address => uint)) public revenues; // hash(coinType) -> seller -> ammount
-    mapping (bytes32 => uint) public totalFees; // hash(coinType) -> fees
+    mapping (uint => CoinInfo) public coinInfo; // uint(coinType) -> coin info
 
     MetaCoinERC20 trustedMetaCoinContract;
     mapping (bytes32=>bool) validOraclizeIds;
 
     // Events.
-    event LogAddedProduct(address indexed seller, bytes32 indexed id, uint indexed internalId);
     event LogNewOraclizeQuery(bytes32 indexed queryId, uint msgValue);
     event LogProductBought(address indexed buyer, address indexed receiver, bytes32 indexed id, CoinTypes coinType);
-    event LogProductRemoved(address indexed seller, bytes32 indexed id);
     event LogUpdateCoinValue(CoinTypes indexed coinType, uint8 decimals, uint value);
-    event LogUpdatedStock(address indexed seller, bytes32 indexed id, uint stock);
-    event LogWithdrawFees(uint ammount, CoinTypes coinType);
-    event LogWithdrawSellerRevenue(address indexed seller, CoinTypes coinType, uint ammount);
 
     // Modifiers.
-    modifier onlyIfAvailable(bytes32 id) {
-        require(products[id].stock >= 1); //check availability
-        _;
-    }
     modifier onlyOraclize() { require(oraclize_cbAddress() == msg.sender); _; }
-    modifier onlySeller(bytes32 id) { require(products[id].seller == msg.sender); _; }
 
     // Constructor.
     function Shopfront(address metaCoinAddress) {
@@ -58,36 +40,17 @@ contract Shopfront is Pausable, usingOraclize {
         trustedMetaCoinContract = MetaCoinERC20(metaCoinAddress);
 
         // Init coin values.
-        coinInfo[keccak256(CoinTypes.Ether)] = CoinInfo({
+        coinInfo[uint(CoinTypes.Ether)] = CoinInfo({
             decimals : ETHER_DECIMALS,
             value : 1 // 1 ether = 1 ether
         });
-        coinInfo[keccak256(CoinTypes.MetaCoin)] = CoinInfo({
+        coinInfo[uint(CoinTypes.MetaCoin)] = CoinInfo({
             decimals : METACOIN_DECIMALS,
             value : 100 // 100 MetaCoin = 1 ether
         });
     }
 
     // Functions.
-    function addProduct(bool acceptMetaCoin, uint internalId, uint price, uint stock)
-        public
-        whenNotPaused
-        returns (bytes32 id)
-    {
-        id = keccak256(msg.sender, internalId);
-        require(products[id].seller == address(0)); //check for empty product
-
-        products[id] = Product({
-            acceptMetaCoin : acceptMetaCoin,
-            price : price,
-            seller : msg.sender,
-            stock : stock
-        });
-
-        LogAddedProduct(msg.sender, id, internalId);
-        return id;
-    }
-
     function buyProductWithEther(bytes32 id, address untrustedReturnAddress, address receiver)
         public
         onlyIfAvailable(id)
@@ -99,7 +62,9 @@ contract Shopfront is Pausable, usingOraclize {
         uint price = products[id].price;
         require(msg.value >= price);
 
-        processPurchase(id, CoinTypes.Ether, receiver);
+        var (ownerRevenue, sellerRevenue) = processPurchase(id, CoinTypes.Ether, receiver);
+        asyncSend(owner, ownerRevenue);
+        asyncSend(products[id].seller, sellerRevenue);
 
         if (msg.value > price)
             untrustedReturnAddress.transfer(msg.value - price);
@@ -115,21 +80,13 @@ contract Shopfront is Pausable, usingOraclize {
     {
         require(products[id].acceptMetaCoin);
 
-        processPurchase(id, CoinTypes.MetaCoin, receiver);
+        var (ownerRevenue, sellerRevenue) = processPurchase(id, CoinTypes.MetaCoin, receiver);
 
         // Don't need to check token availability, because if "ERC20 allowance < price" transfer fails.
-        trustedMetaCoinContract.transferFrom(msg.sender, this,
-            convertValueFromWei(products[id].price, keccak256(CoinTypes.MetaCoin)));
+        trustedMetaCoinContract.transferFrom(msg.sender, owner, ownerRevenue);
+        trustedMetaCoinContract.transferFrom(msg.sender, products[id].seller, sellerRevenue);
 
         return true;
-    }
-
-    function getProductPriceInWei(bytes32 id)
-        public
-        constant
-        returns (uint price)
-    {
-        return products[id].price;
     }
 
     function getProductPriceInMetaCoin(bytes32 id)
@@ -137,26 +94,7 @@ contract Shopfront is Pausable, usingOraclize {
         constant
         returns (uint price)
     {
-        return convertValueFromWei(products[id].price, keccak256(CoinTypes.MetaCoin));
-    }
-
-    function getProductStock(bytes32 id)
-        public
-        constant
-        returns (uint stock)
-    {
-        return products[id].stock;
-    }
-
-    function removeProduct(bytes32 id)
-        public
-        whenNotPaused
-        onlySeller(id)
-        returns (bool success)
-    {
-        delete products[id];
-        LogProductRemoved(msg.sender, id);
-        return true;
+        return convertValueFromWei(products[id].price, CoinTypes.MetaCoin);
     }
 
     function updateMetaCoinValue(uint value)
@@ -165,25 +103,11 @@ contract Shopfront is Pausable, usingOraclize {
         onlyOwner
         returns (bool success)
     {
-        bytes32 coinHash = keccak256(CoinTypes.MetaCoin);
-        uint currentValue = coinInfo[coinHash].value;
+        uint currentValue = coinInfo[uint(CoinTypes.MetaCoin)].value;
         require(currentValue != value);
 
-        coinInfo[coinHash].value = value;
+        coinInfo[uint(CoinTypes.MetaCoin)].value = value;
         LogUpdateCoinValue(CoinTypes.MetaCoin, METACOIN_DECIMALS, value);
-        return true;
-    }
-
-    function updateStock(bytes32 id, uint stock)
-        public
-        whenNotPaused
-        onlySeller(id)
-        returns (bool success)
-    {
-        require(products[id].stock != stock);
-
-        products[id].stock = stock;
-        LogUpdatedStock(msg.sender, id, stock);
         return true;
     }
 
@@ -200,72 +124,6 @@ contract Shopfront is Pausable, usingOraclize {
         
         return true;
     }
-
-    function withdrawEtherFees()
-        public
-        whenNotPaused
-        onlyOwner
-        returns (bool success)
-    {
-        bytes32 coinHash = keccak256(CoinTypes.Ether);
-        require(totalFees[coinHash] > 0);
-
-        uint fees = totalFees[coinHash];
-        totalFees[coinHash] = 0;
-        owner.transfer(fees);
-
-        LogWithdrawFees(fees, CoinTypes.Ether);
-        return true;
-    }
-
-    function withdrawMetaCoinFees()
-        public
-        whenNotPaused
-        onlyOwner
-        returns (bool success)
-    {
-        bytes32 coinHash = keccak256(CoinTypes.MetaCoin);
-        require(totalFees[coinHash] > 0);
-
-        uint fees = totalFees[coinHash];
-        totalFees[coinHash] = 0;
-        trustedMetaCoinContract.transfer(owner, fees);
-
-        LogWithdrawFees(fees, CoinTypes.MetaCoin);
-        return true;
-    }
-
-    function withdrawSellerEtherRevenue()
-        public
-        whenNotPaused
-        returns (bool success)
-    {
-        bytes32 coinHash = keccak256(CoinTypes.Ether);
-        require(revenues[coinHash][msg.sender] > 0);
-
-        uint revenue = revenues[coinHash][msg.sender];
-        revenues[coinHash][msg.sender] = 0;
-        msg.sender.transfer(revenue);
-
-        LogWithdrawSellerRevenue(msg.sender, CoinTypes.Ether, revenue);
-        return true;
-    }
-
-    function withdrawSellerMetaCoinRevenue()
-        public
-        whenNotPaused
-        returns (bool success)
-    {
-        bytes32 coinHash = keccak256(CoinTypes.MetaCoin);
-        require(revenues[coinHash][msg.sender] > 0);
-
-        uint revenue = revenues[coinHash][msg.sender];
-        revenues[coinHash][msg.sender] = 0;
-        trustedMetaCoinContract.transfer(msg.sender, revenue);
-
-        LogWithdrawSellerRevenue(msg.sender, CoinTypes.MetaCoin, revenue);
-        return true;
-    }
     
     function __callback(bytes32 myid, string result)
         public
@@ -274,8 +132,7 @@ contract Shopfront is Pausable, usingOraclize {
         require(validOraclizeIds[myid]);
 
         // Update USD value
-        bytes32 coinHash = keccak256(CoinTypes.USD);
-        CoinInfo storage coin = coinInfo[coinHash];
+        CoinInfo storage coin = coinInfo[uint(CoinTypes.USD)];
 
         coin.decimals = ETHER_DECIMALS; //arbitrary cast for simplify maths
         coin.value = parseInt(result, ETHER_DECIMALS);
@@ -285,13 +142,13 @@ contract Shopfront is Pausable, usingOraclize {
     }
 
     // Helpers.
-    function convertValueFromWei(uint value, bytes32 destCoinHash)
-        private
+    function convertValueFromWei(uint value, CoinTypes destCoin)
+        public
         constant
         returns (uint destValue)
     {
-        uint destCoinValue = coinInfo[destCoinHash].value;
-        uint8 destCoinDecimals = coinInfo[destCoinHash].decimals;
+        uint destCoinValue = coinInfo[uint(destCoin)].value;
+        uint8 destCoinDecimals = coinInfo[uint(destCoin)].decimals;
         if (destCoinDecimals >= ETHER_DECIMALS) {
             return value * destCoinValue * (10 ** uint(destCoinDecimals - ETHER_DECIMALS));
         } else {
@@ -303,21 +160,18 @@ contract Shopfront is Pausable, usingOraclize {
         private
         onlyIfAvailable(id)
         whenNotPaused
-        returns (bool success)
+        returns (uint ownerRevenue, uint sellerRevenue)
     {
-        bytes32 coinHash = keccak256(coinType);
         Product storage product = products[id];
 
         if (receiver == address(0))
             receiver = msg.sender;
-        uint price = convertValueFromWei(products[id].price, coinHash);
+        uint price = convertValueFromWei(products[id].price, coinType);
         uint fees = price * THOUSANDTHS_FEES_RATE / 1000;
 
         product.stock--;
-        totalFees[coinHash] += fees;
-        revenues[coinHash][product.seller] += price - fees;
         LogProductBought(msg.sender, receiver, id, coinType);
 
-        return true;
+        return (fees, price - fees);
     }
 }
